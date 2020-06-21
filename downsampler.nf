@@ -16,7 +16,7 @@ Channel
 
 bam = Channel.fromPath(params.bam)
 ds  = [ 0.8 ]
-replicates=2
+replicates=1
 
 
 process samtools {
@@ -42,7 +42,7 @@ process downsample {
     each rep from 1..replicates
 
     output:
-    file "${event}_${ds}_${rep}.bam" into picard_out 
+    set event, ds, rep, file("${event}_${ds}_${rep}.bam") into picard_out 
 
     script:
     """
@@ -59,7 +59,10 @@ process fusion_calling {
    conda '/home/chris/anaconda3/envs/rmats41'
 
    input:
-   file bam from picard_out
+   set event, ds, rep, file(bam) from picard_out
+
+   output:
+   set event, ds, file('./output/SE.MATS.JC.txt') into calling_out
 
    script:
    """
@@ -78,6 +81,3 @@ process fusion_calling {
 
    """
 }
-
-
-
