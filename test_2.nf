@@ -1,22 +1,27 @@
 #!/usr/bin/env nextflow
 
-params.eventsFile = '/home/chris/downsampler/events.txt'
-params.bam = '/home/chris/downsampler/data/20M80816A_50ng_Aligned_sorted.bam'
+params.chr = ''
+params.start= ''
+params.end= ''
+params.event= ''
 
 READ_LENGTH=75
 GTF_PATH='/home/chris/downsampler/caller/ref_annot_EGFRvIII_MET.gtf'
 THREADS=1
 RMATS_REF_SAMPLES='/home/chris/downsampler/caller/b2.txt'
 
-Channel
-    .fromPath(params.eventsFile)
-    .splitCsv(header:true, sep:'\t')
-    .map{ row-> tuple([row.CHR, row.START, row.END, row.EVENT]) }
-    .set { events_ch }
+params.replicates=3
+params.bam = '/home/chris/downsampler/data/20M80816A_50ng_Aligned_sorted.bam'
+
+events_ch = Channel.of(tuple([params.chr, params.start, params.end, params.event]))
+
+feedback_ch = Channel.create()
+downsample_ch = Channel.value(0.5)
+
+feedback_event_ch = Channel.create()
 
 bam = Channel.fromPath(params.bam)
-ds  = [ 0.8 ]
-replicates=2
+
 
 
 process samtools {
@@ -25,7 +30,8 @@ process samtools {
     set CHR, START, END, EVENT from events_ch
 
     output:
-    set EVENT, file("${EVENT}.bam") into events_bam_ch
+    tuple EVENT, path("${EVENT}.bam") into events_bam_ch
+    tuple EVENT, path("${EVENT}.bam") into bam_mem
 
     script:
     """
@@ -37,12 +43,13 @@ process samtools {
 process downsample {
 
     input:
-    set event, file(bam) from events_bam_ch
-    each ds from ds
-    each rep from 1..replicates
+    tuple event, path(bam) from events_bam_ch.mix(feedback_event_ch)
+    val ds from downsample_ch.mix(feedback_ch)
+    each rep from 1..params.replicates
 
     output:
-    set event, ds, rep, file("${event}_${ds}_${rep}.bam") into picard_out 
+    tuple event, ds, rep, path("${event}_${ds}_${rep}.bam") into picard_out
+    tuple event, path(bam) into mem_bam
 
     script:
     """
@@ -59,9 +66,12 @@ process fusion_calling {
    conda '/home/chris/anaconda3/envs/rmats41'
 
    input:
-   set event, ds, rep, file(bam) from picard_out
+   tuple event, ds, rep, path(bam) from picard_out
+   tuple event_mem, path(bam_mem) from mem_bam
 
    output:
+   val 0.8 into feedback_ch
+   tuple event_mem, path(bam_mem) into feedback_event_ch
    tuple event, ds, file('./output/SE.MATS.JC.txt') into calling_out
 
    script:
@@ -82,14 +92,4 @@ process fusion_calling {
    """
 }
 
-
-process feedback {
-
-    input:
-    tuple event, ds, file(results) from calling_out.collect()
-
-    """
-    echo "help"
-    """ 
-}
-
+calling_out.view{it}
